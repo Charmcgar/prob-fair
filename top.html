@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plinko Top Half</title>
+<style>
+  body {
+    margin: 0; 
+    background: #000; 
+    color: #0ff; 
+    font-family: monospace; 
+    user-select: none;
+  }
+  #info {
+    padding: 10px;
+    text-align: center;
+  }
+  canvas {
+    display: block;
+    margin: 0 auto;
+    background: #000;
+    box-shadow: 0 0 15px cyan;
+  }
+</style>
+</head>
+<body>
+<div id="info">
+  <div>Controls: Press <b>T</b> to drop the ball. Use <b>G</b> (left) and <b>H</b> (right) to nudge.</div>
+  <div>Ball falling on top half. Bottom half runs on another screen syncing via Firebase.</div>
+</div>
+<canvas id="plinko"></canvas>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+<script>
+  // --- Firebase config and init ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyD-zt7ETWegOaim1w8qQ39WW-Qhp4R7Bpc",
+    authDomain: "fair-6061b.firebaseapp.com",
+    databaseURL: "https://fair-6061b-default-rtdb.firebaseio.com/",
+    projectId: "fair-6061b",
+    storageBucket: "fair-6061b.appspot.com",
+    messagingSenderId: "797874572899",
+    appId: "1:797874572899:web:4364144af2da6bfdacb256",
+    measurementId: "G-9QRYRPC7FD"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // --- Canvas setup ---
+  const canvas = document.getElementById('plinko');
+  const ctx = canvas.getContext('2d');
+
+  // Virtual tall area height (arbitrary large)
+  const VIRTUAL_TOTAL_HEIGHT = 1200;
+  // Top half covers from y=0 to y=VIRTUAL_TOTAL_HEIGHT/2
+  const TOP_HALF_HEIGHT = VIRTUAL_TOTAL_HEIGHT / 2;
+
+  // Responsive canvas sizing: full window width, height = window height / 2
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- Physics constants ---
+  const GRAVITY = 0.4;
+  const FRICTION = 0.99;
+  const BALL_RADIUS = 12;
+  const PEG_RADIUS = 8;
+  const PEG_ROWS = 10;
+  const PEG_COLS = 8;
+  const PEG_SPACING_X = canvas.width / (PEG_COLS + 1);
+  const PEG_SPACING_Y = TOP_HALF_HEIGHT / (PEG_ROWS + 1);
+
+  // Pegs: staggered rows
+  let pegs = [];
+  for (let row = 0; row < PEG_ROWS; row++) {
+    for (let col = 0; col < PEG_COLS; col++) {
+      let x = PEG_SPACING_X * (col + 1);
+      if (row % 2 === 1) x += PEG_SPACING_X / 2;
+      let y = PEG_SPACING_Y * (row + 1);
+      pegs.push({x, y});
+    }
+  }
+
+  // Ball state
+  let ball = {
+    x: canvas.width / 2,
+    y: 20,
+    vx: 0,
+    vy: 0,
+    dropped: false
+  };
+
+  // Keyboard input state
+  let keys = {G: false, H: false, T: false};
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'g') keys.G = true;
+    if (e.key.toLowerCase() === 'h') keys.H = true;
+    if (e.key.toLowerCase() === 't') keys.T = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key.toLowerCase() === 'g') keys.G = false;
+    if (e.key.toLowerCase() === 'h') keys.H = false;
+    if (e.key.toLowerCase() === 't') keys.T = false;
+  });
+
+  // Firebase refs
+  const ballRef = db.ref('plinko/ball');
+
+  // Update Firebase ball state function
+  function updateFirebaseBall() {
+    ballRef.set({
+      x: ball.x,
+      y: ball.y,
+      vx: ball.vx,
+      vy: ball.vy,
+      dropped: ball.dropped
+    });
+  }
+
+  // Main update loop
+  function update() {
+    // Only update physics if dropped
+    if (ball.dropped) {
+      // Apply gravity
+      ball.vy += GRAVITY;
+
+      // Apply friction to horizontal velocity
+      ball.vx *= FRICTION;
+
+      // Nudge controls
+      if (keys.G) ball.vx -= 0.3;
+      if (keys.H) ball.vx += 0.3;
+
+      // Update position
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+
+      // Collision with walls (left/right)
+      if (ball.x < BALL_RADIUS) {
+        ball.x = BALL_RADIUS;
+        ball.vx = -ball.vx * 0.7;
+      } else if (ball.x > canvas.width - BALL_RADIUS) {
+        ball.x = canvas.width - BALL_RADIUS;
+        ball.vx = -ball.vx * 0.7;
+      }
+
+      // Collision with pegs
+      pegs.forEach(peg => {
+        let dx = ball.x - peg.x;
+        let dy = ball.y - peg.y;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        let minDist = BALL_RADIUS + PEG_RADIUS;
+        if (dist < minDist) {
+          // Simple collision response: reflect velocity
+          let angle = Math.atan2(dy, dx);
+          let targetX = peg.x + Math.cos(angle) * minDist;
+          let targetY = peg.y + Math.sin(angle) * minDist;
+          // Move ball outside peg
+          ball.x = targetX;
+          ball.y = targetY;
+          // Reflect velocity vector based on normal
+          let normalX = dx / dist;
+          let normalY = dy / dist;
+          let dot = ball.vx * normalX + ball.vy * normalY;
+          ball.vx -= 2 * dot * normalX;
+          ball.vy -= 2 * dot * normalY;
+          // Apply damping
+          ball.vx *= 0.8;
+          ball.vy *= 0.8;
+        }
+      });
+
+      // If ball crosses bottom boundary of top half
+      if (ball.y > TOP_HALF_HEIGHT) {
+        // Clamp ball.y to exactly bottom boundary to sync properly
+        ball.y = TOP_HALF_HEIGHT;
+        // Sync to Firebase for bottom half to pick up
+        updateFirebaseBall();
+        // Stop physics here since bottom half will handle now
+        ball.dropped = false; // freeze top half ball until reset externally
+      }
+
+      // Sync updated ball position/velocity continuously
+      updateFirebaseBall();
+    } else {
+      // If ball not dropped, wait for "T" to drop
+      if (keys.T) {
+        ball.dropped = true;
+        ball.x = canvas.width / 2;
+        ball.y = 20;
+        ball.vx = 0;
+        ball.vy = 0;
+        updateFirebaseBall();
+      }
+    }
+  }
+
+  // Drawing functions
+  function drawPeg(x, y) {
+    ctx.beginPath();
+    ctx.shadowColor = 'cyan';
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = 'cyan';
+    ctx.arc(x, y, PEG_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawBall(x, y) {
+    ctx.beginPath();
+    ctx.shadowColor = 'cyan';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#0ff';
+    ctx.arc(x, y, BALL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw pegs
+    pegs.forEach(p => drawPeg(p.x, p.y));
+
+    // Draw bottom boundary line (for visual)
+    ctx.strokeStyle = 'cyan';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 10]);
+    ctx.beginPath();
+    ctx.moveTo(0, TOP_HALF_HEIGHT * (canvas.height / TOP_HALF_HEIGHT));
+    ctx.lineTo(canvas.width, TOP_HALF_HEIGHT * (canvas.height / TOP_HALF_HEIGHT));
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw ball
+    drawBall(ball.x, ball.y);
+
+    // Draw instructions text on canvas
+    ctx.fillStyle = 'cyan';
+    ctx.font = '16px monospace';
+    ctx.fillText('Press T to drop the ball. G/H to nudge left/right.', 20, 20);
+  }
+
+  // Main loop
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Start
+  loop();
+
+</script>
+</body>
+</html>
