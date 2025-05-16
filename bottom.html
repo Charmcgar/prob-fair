@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plinko Bottom Half</title>
+<style>
+  body {
+    margin: 0; 
+    background: #000; 
+    color: #0ff; 
+    font-family: monospace; 
+    user-select: none;
+  }
+  #info {
+    padding: 10px;
+    text-align: center;
+  }
+  canvas {
+    display: block;
+    margin: 0 auto;
+    background: #000;
+    box-shadow: 0 0 15px cyan;
+  }
+</style>
+</head>
+<body>
+<div id="info">
+  <div>Bottom half of Plinko. Ball syncs from top half.</div>
+  <div>Score: <span id="score">0</span></div>
+  <div>Controls: G/H to nudge left/right.</div>
+</div>
+<canvas id="plinko"></canvas>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+<script>
+  // --- Firebase config and init ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyD-zt7ETWegOaim1w8qQ39WW-Qhp4R7Bpc",
+    authDomain: "fair-6061b.firebaseapp.com",
+    databaseURL: "https://fair-6061b-default-rtdb.firebaseio.com/",
+    projectId: "fair-6061b",
+    storageBucket: "fair-6061b.appspot.com",
+    messagingSenderId: "797874572899",
+    appId: "1:797874572899:web:4364144af2da6bfdacb256",
+    measurementId: "G-9QRYRPC7FD"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // --- Canvas setup ---
+  const canvas = document.getElementById('plinko');
+  const ctx = canvas.getContext('2d');
+
+  const scoreEl = document.getElementById('score');
+
+  const VIRTUAL_TOTAL_HEIGHT = 1200;
+  const BOTTOM_HALF_Y_START = VIRTUAL_TOTAL_HEIGHT / 2;
+  const BOTTOM_HALF_HEIGHT = VIRTUAL_TOTAL_HEIGHT / 2;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // --- Physics constants ---
+  const GRAVITY = 0.4;
+  const FRICTION = 0.99;
+  const BALL_RADIUS = 12;
+  const PEG_RADIUS = 8;
+  const PEG_ROWS = 10;
+  const PEG_COLS = 8;
+  const PEG_SPACING_X = canvas.width / (PEG_COLS + 1);
+  const PEG_SPACING_Y = BOTTOM_HALF_HEIGHT / (PEG_ROWS + 1);
+
+  // Pegs: staggered rows
+  let pegs = [];
+  for (let row = 0; row < PEG_ROWS; row++) {
+    for (let col = 0; col < PEG_COLS; col++) {
+      let x = PEG_SPACING_X * (col + 1);
+      if (row % 2 === 1) x += PEG_SPACING_X / 2;
+      // Peg y offset relative to bottom half top boundary
+      let y = PEG_SPACING_Y * (row + 1);
+      pegs.push({x, y});
+    }
+  }
+
+  // Ball state (start offscreen)
+  let ball = {
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    dropped: false
+  };
+
+  // Score
+  let score = 0;
+
+  // Keyboard input state
+  let keys = {G: false, H: false};
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'g') keys.G = true;
+    if (e.key.toLowerCase() === 'h') keys.H = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key.toLowerCase() === 'g') keys.G = false;
+    if (e.key.toLowerCase() === 'h') keys.H = false;
+  });
+
+  // Firebase refs
+  const ballRef = db.ref('plinko/ball');
+  const scoreRef = db.ref('plinko/score');
+
+  // Listen for ball updates from Firebase
+  ballRef.on('value', snapshot => {
+    const data = snapshot.val();
+    if (!data) return;
+    // Only update local ball state if ball is dropped (so bottom half controls physics)
+    if (data.dropped) {
+      ball.x = data.x;
+      ball.y = data.y - BOTTOM_HALF_Y_START; // shift to local canvas coords (bottom half starts at half height)
+      ball.vx = data.vx;
+      ball.vy = data.vy;
+      ball.dropped = true;
+    } else {
+      // Ball not dropped means top half is still controlling / waiting
+      ball.dropped = false;
+    }
+  });
+
+  // Listen for score updates from Firebase
+  scoreRef.on('value', snapshot => {
+    score = snapshot.val() || 0;
+    scoreEl.textContent = score;
+  });
+
+  // Update Firebase ball position & velocity (called when ball moves here)
+  function updateFirebaseBall() {
+    ballRef.set({
+      x: ball.x,
+      y: ball.y + BOTTOM_HALF_Y_START, // convert local bottom half y to global y in virtual space
+      vx: ball.vx,
+      vy: ball.vy,
+      dropped: ball.dropped
+    });
+  }
+
+  // Update Firebase score
+  function updateFirebaseScore() {
+    scoreRef.set(score);
+  }
+
+  // Physics and game logic update
+  function update() {
+    if (!ball.dropped) return; // wait for ball drop from top half
+
+    // Apply gravity
+    ball.vy += GRAVITY;
+
+    // Apply friction to horizontal velocity
+    ball.vx *= FRICTION;
+
+    // Nudge controls
+    if (keys.G) ball.vx -= 0.3;
+    if (keys.H) ball.vx += 0.3;
+
+    // Update position
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    // Collision with walls
+    if (ball.x < BALL_RADIUS) {
+      ball.x = BALL_RADIUS;
+      ball.vx = -ball.vx * 0.7;
+    } else if (ball.x > canvas.width - BALL_RADIUS) {
+      ball.x = canvas.width - BALL_RADIUS;
+      ball.vx = -ball.vx * 0.7;
+    }
+
+    // Collision with pegs
+    pegs.forEach(peg => {
+      let dx = ball.x - peg.x;
+      let dy = ball.y - peg.y;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      let minDist = BALL_RADIUS + PEG_RADIUS;
+      if (dist < minDist) {
+        // Reflect velocity on peg collision
+        let angle = Math.atan2(dy, dx);
+        let targetX = peg.x + Math.cos(angle) * minDist;
+        let targetY = peg.y + Math.sin(angle) * minDist;
+        ball.x = targetX;
+        ball.y = targetY;
+        let normalX = dx / dist;
+        let normalY = dy / dist;
+        let dot = ball.vx * normalX + ball.vy * normalY;
+        ball.vx -= 2 * dot * normalX;
+        ball.vy -= 2 * dot * normalY;
+        ball.vx *= 0.8;
+        ball.vy *= 0.8;
+      }
+    });
+
+    // If ball reaches bottom boundary (bottom of bottom half)
+    if (ball.y > BOTTOM_HALF_HEIGHT) {
+      // Clamp position
+      ball.y = BOTTOM_HALF_HEIGHT;
+      ball.dropped = false;
+
+      // Increment score
+      score++;
+      updateFirebaseScore();
+
+      // Reset ball in Firebase for top half to drop again
+      ballRef.set({
+        x: canvas.width / 2,
+        y: 20,
+        vx: 0,
+        vy: 0,
+        dropped: false
+      });
+    } else {
+      // Update Firebase ball position as it moves here
+      updateFirebaseBall();
+    }
+  }
+
+  // Drawing functions
+  function drawPeg(x, y) {
+    ctx.beginPath();
+    ctx.shadowColor = 'cyan';
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = 'cyan';
+    ctx.arc(x, y, PEG_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawBall(x, y) {
+    ctx.beginPath();
+    ctx.shadowColor = 'cyan';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#0ff';
+    ctx.arc(x, y, BALL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw pegs
+    pegs.forEach(p => drawPeg(p.x, p.y));
+
+    // Draw bottom boundary line (for visual)
+    ctx.strokeStyle = 'cyan';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 10]);
+    ctx.beginPath();
+    ctx.moveTo(0, BOTTOM_HALF_HEIGHT * (canvas.height / BOTTOM_HALF_HEIGHT));
+    ctx.lineTo(canvas.width, BOTTOM_HALF_HEIGHT * (canvas.height / BOTTOM_HALF_HEIGHT));
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw ball
+    drawBall(ball.x, ball.y);
+
+    // Draw score text
+    ctx.fillStyle = 'cyan';
+    ctx.font = '20px monospace';
+    ctx.fillText(`Score: ${score}`, 20, 30);
+
+    // Draw instructions
+    ctx.font = '16px monospace';
+    ctx.fillText('Use G/H to nudge left/right.', 20, 55);
+  }
+
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+</script>
+</body>
+</html>
