@@ -80,7 +80,7 @@
     Bodies.rectangle(W,H/2,50,H,{isStatic:true}),
   ]);
 
-  // Pegs static
+  // Pegs fixed
   const rows=8, cols=11, spacing=60;
   for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
     const offset = r%2 ? 0 : spacing/2;
@@ -96,11 +96,13 @@
   }
   World.add(world,Bodies.rectangle(W/2,H-20,W,40,{isStatic:true,render:{fillStyle:'#111'}}));
 
-  // Particle system
+  // Particle system (optimized)
   const ctx=render.context;
   const particles=[];
+  const MAX_PARTICLES = 200;  // limit max particles to reduce lag
   function addParticle(x,y,color){
-    particles.push({x,y,r:Math.random()*2+1,alpha:1,color,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-1)*0.5,life:40});
+    if(particles.length >= MAX_PARTICLES) return;
+    particles.push({x,y,r:Math.random()*2+1,alpha:1,color,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-1)*0.5,life:30});
   }
   function drawParticles(){
     for(let i=particles.length-1;i>=0;i--){
@@ -111,14 +113,14 @@
       ctx.shadowBlur=8;
       ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
       ctx.fill();
-      p.x+=p.vx; p.y+=p.vy; p.alpha-=0.03; p.life--;
+      p.x+=p.vx; p.y+=p.vy; p.alpha-=0.04; p.life--;
       if(p.life<=0||p.alpha<=0) particles.splice(i,1);
     }
   }
 
-  // Drop balls at fully random horizontal position
+  // Drop balls at fully random spawn positions
   function dropBall(){
-    const x = Math.random()*(W-60)+30; // 30px padding left and right
+    const x = Math.random() * (W-60) + 30;  // Avoid edges
     const ball = Bodies.circle(x, 50, 12, { restitution:0.5, render:{fillStyle:`hsl(${Math.random()*360},100%,50%)`} });
     ball.trailColor = hslToRgb(ball.render.fillStyle);
     balls.push(ball);
@@ -141,11 +143,11 @@
   // Track balls & particles
   let balls = [];
   Events.on(engine, 'afterUpdate', () => {
-    balls.forEach(ball => {
+    balls.forEach((ball,i) => {
       addParticle(ball.position.x, ball.position.y, ball.trailColor);
       if(ball.position.y > H + 50){
         World.remove(world, ball);
-        balls = balls.filter(b => b !== ball);
+        balls.splice(i,1);  // Remove ball immediately from array
       }
     });
     drawParticles();
@@ -165,7 +167,7 @@
         const topIdx = slotCounts.indexOf(maxCount);
         topSlotSpan.textContent = topIdx + 1;
 
-        for(let i=0; i<15; i++) addParticle(ball.position.x, H-60, ball.trailColor);
+        for(let i=0; i<6; i++) addParticle(ball.position.x, H-60, ball.trailColor);  // fewer particles here
         updateGraph();
       }
     });
