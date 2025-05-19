@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Plinko Game: Enhanced Compact</title>
+<title>Plinko Game: Camera Tracking</title>
 <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
 <style>
   body {
@@ -51,114 +51,157 @@
 <script>
 (() => {
   const { Engine, Render, Runner, Bodies, World, Events, Body } = Matter;
-  const W=600,H=800;
-  const engine = Engine.create(), world=engine.world;
-  const canvas=document.getElementById('canvas');
-  const render=Render.create({canvas,engine,options:{width:W,height:H,wireframes:false,background:'transparent'}});
+  const W = 600, H = 1200; // taller board for scrolling
+  const viewHeight = 800;  // canvas height (fixed)
+  let camY = 0;
+
+  const engine = Engine.create(), world = engine.world;
+  const canvas = document.getElementById('canvas');
+  const render = Render.create({
+    canvas,
+    engine,
+    options: { width: W, height: viewHeight, wireframes: false, background: 'transparent' }
+  });
   Render.run(render);
   Runner.run(Runner.create(), engine);
 
   // Graph setup
-  const slots=6;
-  let slotCounts=Array(slots).fill(0), totalBalls=0;
-  const barsContainer=document.getElementById('graphBars');
-  const bars=[];
-  for(let i=0;i<slots;i++){
-    const bar=document.createElement('div'); bar.className='bar'; bar.style.height='0%';
-    const count=document.createElement('span'); count.className='count'; count.textContent='0';
+  const slots = 6;
+  let slotCounts = Array(slots).fill(0), totalBalls = 0;
+  const barsContainer = document.getElementById('graphBars');
+  const bars = [];
+  for (let i = 0; i < slots; i++) {
+    const bar = document.createElement('div'); bar.className = 'bar'; bar.style.height = '0%';
+    const count = document.createElement('span'); count.className = 'count'; count.textContent = '0';
     bar.appendChild(count); barsContainer.appendChild(bar);
-    bars.push({bar,count});
+    bars.push({ bar, count });
   }
-  const totalBallsSpan=document.getElementById('totalBalls');
-  const topSlotSpan=document.getElementById('topSlot');
+  const totalBallsSpan = document.getElementById('totalBalls');
+  const topSlotSpan = document.getElementById('topSlot');
 
   // Walls
   World.add(world, [
-    Bodies.rectangle(W/2,0,W,50,{isStatic:true}),
-    Bodies.rectangle(W/2,H,W,50,{isStatic:true}),
-    Bodies.rectangle(0,H/2,50,H,{isStatic:true}),
-    Bodies.rectangle(W,H/2,50,H,{isStatic:true}),
+    Bodies.rectangle(W / 2, 0, W, 50, { isStatic: true }),
+    Bodies.rectangle(W / 2, H, W, 50, { isStatic: true }),
+    Bodies.rectangle(0, H / 2, 50, H, { isStatic: true }),
+    Bodies.rectangle(W, H / 2, 50, H, { isStatic: true }),
   ]);
 
-  // Pegs fixed
-  const rows=8, cols=11, spacing=60;
-  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
-    const offset = r%2 ? 0 : spacing/2;
-    let x = c*spacing + offset + 30;
-    const y = r*spacing + 120;
-    const peg = Bodies.circle(x,y,8,{isStatic:true,render:{fillStyle:'#1e40af',strokeStyle:'#3b82f6',lineWidth:3}});
-    World.add(world, peg);
-  }
-
-  // Slots dividers + floor
-  for(let i=0;i<=slots;i++){
-    World.add(world,Bodies.rectangle(i*W/slots,H-90,10,180,{isStatic:true,render:{fillStyle:'#222'}}));
-  }
-  World.add(world,Bodies.rectangle(W/2,H-20,W,40,{isStatic:true,render:{fillStyle:'#111'}}));
-
-  // Particle system (optimized)
-  const ctx=render.context;
-  const particles=[];
-  const MAX_PARTICLES = 200;  // limit max particles to reduce lag
-  function addParticle(x,y,color){
-    if(particles.length >= MAX_PARTICLES) return;
-    particles.push({x,y,r:Math.random()*2+1,alpha:1,color,vx:(Math.random()-0.5)*0.5,vy:(Math.random()-1)*0.5,life:30});
-  }
-  function drawParticles(){
-    for(let i=particles.length-1;i>=0;i--){
-      const p=particles[i];
-      ctx.beginPath();
-      ctx.fillStyle=`rgba(${p.color.r},${p.color.g},${p.color.b},${p.alpha})`;
-      ctx.shadowColor=`rgba(${p.color.r},${p.color.g},${p.color.b},${p.alpha})`;
-      ctx.shadowBlur=8;
-      ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-      ctx.fill();
-      p.x+=p.vx; p.y+=p.vy; p.alpha-=0.04; p.life--;
-      if(p.life<=0||p.alpha<=0) particles.splice(i,1);
+  // Pegs - fixed position, no movement
+  const rows = 12, cols = 11, spacing = 60;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const offset = r % 2 ? 0 : spacing / 2;
+      const x = c * spacing + offset + 30;
+      const y = r * spacing + 120;
+      const peg = Bodies.circle(x, y, 8, { isStatic: true, render: { fillStyle: '#1e40af', strokeStyle: '#3b82f6', lineWidth: 3 } });
+      World.add(world, peg);
     }
   }
 
-  // Drop balls at fully random spawn positions
-  function dropBall(){
-    const x = Math.random() * (W-60) + 30;  // Avoid edges
-    const ball = Bodies.circle(x, 50, 12, { restitution:0.5, render:{fillStyle:`hsl(${Math.random()*360},100%,50%)`} });
+  // Slots dividers + floor
+  for (let i = 0; i <= slots; i++) {
+    World.add(world, Bodies.rectangle(i * W / slots, H - 90, 10, 180, { isStatic: true, render: { fillStyle: '#222' } }));
+  }
+  World.add(world, Bodies.rectangle(W / 2, H - 20, W, 40, { isStatic: true, render: { fillStyle: '#111' } }));
+
+  // Particle system
+  const ctx = render.context;
+  const particles = [];
+  function addParticle(x, y, color) {
+    particles.push({
+      x, y, r: Math.random() * 2 + 1, alpha: 1, color,
+      vx: (Math.random() - 0.5) * 0.5, vy: (Math.random() - 1) * 0.5, life: 40
+    });
+  }
+  function drawParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(${p.color.r},${p.color.g},${p.color.b},${p.alpha})`;
+      ctx.shadowColor = `rgba(${p.color.r},${p.color.g},${p.color.b},${p.alpha})`;
+      ctx.shadowBlur = 8;
+      ctx.arc(p.x, p.y - camY, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      p.x += p.vx; p.y += p.vy; p.alpha -= 0.03; p.life--;
+      if (p.life <= 0 || p.alpha <= 0) particles.splice(i, 1);
+    }
+  }
+
+  // Drop balls at fully random spawn x
+  let balls = [];
+  let trackedBall = null;
+  function dropBall() {
+    const x = Math.random() * (W - 60) + 30;
+    const ball = Bodies.circle(x, 50, 12, {
+      restitution: 0.5,
+      render: { fillStyle: `hsl(${Math.random() * 360},100%,50%)` }
+    });
     ball.trailColor = hslToRgb(ball.render.fillStyle);
     balls.push(ball);
     World.add(world, ball);
+    trackedBall = ball;
   }
 
   // Convert hsl string "hsl(h,s%,l%)" to rgb object for particles
-  function hslToRgb(hsl){
-    let [h,s,l]=hsl.match(/(\d+\.?\d*)/g).map(Number);
+  function hslToRgb(hsl) {
+    let [h, s, l] = hsl.match(/(\d+\.?\d*)/g).map(Number);
     s /= 100; l /= 100;
-    let c = (1 - Math.abs(2*l - 1)) * s;
-    let x = c * (1 - Math.abs((h/60) % 2 - 1));
-    let m = l - c/2;
-    let r=0,g=0,b=0;
-    if(h<60){r=c;g=x;b=0;} else if(h<120){r=x;g=c;b=0;} else if(h<180){r=0;g=c;b=x;}
-    else if(h<240){r=0;g=x;b=c;} else if(h<300){r=x;g=0;b=c;} else{r=c;g=0;b=x;}
-    return {r:Math.round((r+m)*255), g:Math.round((g+m)*255), b:Math.round((b+m)*255)};
+    let c = (1 - Math.abs(2 * l - 1)) * s;
+    let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    let m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else { r = c; g = 0; b = x; }
+    return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) };
   }
 
-  // Track balls & particles
-  let balls = [];
+  // Track balls & particles, remove balls touching floor
   Events.on(engine, 'afterUpdate', () => {
-    balls.forEach((ball,i) => {
+    balls.forEach(ball => {
       addParticle(ball.position.x, ball.position.y, ball.trailColor);
-      if(ball.position.y > H + 50){
+      if (ball.position.y > H - 50) {
         World.remove(world, ball);
-        balls.splice(i,1);  // Remove ball immediately from array
+        ball.removed = true;
       }
     });
+    balls = balls.filter(b => !b.removed);
+
+    // Camera tracking
+    if (trackedBall && !trackedBall.removed) {
+      let targetCamY = trackedBall.position.y - viewHeight / 2;
+      targetCamY = Math.min(H - viewHeight, Math.max(0, targetCamY));
+      camY += (targetCamY - camY) * 0.15;
+
+      render.bounds.min.y = camY;
+      render.bounds.max.y = camY + viewHeight;
+      Render.lookAt(render, {
+        min: { x: 0, y: camY },
+        max: { x: W, y: camY + viewHeight }
+      });
+    } else {
+      camY += (0 - camY) * 0.1;
+      render.bounds.min.y = camY;
+      render.bounds.max.y = camY + viewHeight;
+      Render.lookAt(render, {
+        min: { x: 0, y: camY },
+        max: { x: W, y: camY + viewHeight }
+      });
+    }
+
     drawParticles();
   });
 
   // Update stats on floor collision
   Events.on(engine, 'collisionStart', e => {
-    e.pairs.forEach(({bodyA, bodyB}) => {
+    e.pairs.forEach(({ bodyA, bodyB }) => {
       const ball = [bodyA, bodyB].find(b => !b.isStatic);
-      if(ball && !ball.counted && ball.position.y > H - 100){
-        const idx = Math.min(slots-1, Math.floor(ball.position.x / (W/slots)));
+      if (ball && !ball.counted && ball.position.y > H - 100) {
+        const idx = Math.min(slots - 1, Math.floor(ball.position.x / (W / slots)));
         slotCounts[idx]++;
         totalBalls++;
         ball.counted = true;
@@ -167,16 +210,16 @@
         const topIdx = slotCounts.indexOf(maxCount);
         topSlotSpan.textContent = topIdx + 1;
 
-        for(let i=0; i<6; i++) addParticle(ball.position.x, H-60, ball.trailColor);  // fewer particles here
+        for (let i = 0; i < 15; i++) addParticle(ball.position.x, H - 60, ball.trailColor);
         updateGraph();
       }
     });
   });
 
-  function updateGraph(){
+  function updateGraph() {
     const max = Math.max(...slotCounts, 1);
-    bars.forEach(({bar,count},i) => {
-      const h = (slotCounts[i]/max)*100;
+    bars.forEach(({ bar, count }, i) => {
+      const h = (slotCounts[i] / max) * 100;
       bar.style.height = h + '%';
       count.textContent = slotCounts[i];
     });
@@ -184,9 +227,9 @@
 
   // Controls
   window.addEventListener('keydown', e => {
-    if(e.code === 'Space') dropBall();
-    else if(e.key === '1')
-      for(let i=0; i<100; i++) setTimeout(dropBall, i*30);
+    if (e.code === 'Space') dropBall();
+    else if (e.key === '1')
+      for (let i = 0; i < 100; i++) setTimeout(dropBall, i * 30);
   });
 
   updateGraph();
