@@ -19,6 +19,8 @@
   Red = High pressure, Blue = Low pressure.
 </div>
 <canvas id="canvas"></canvas>
+
+<!-- Vertex Shader -->
 <script id="vertexShader" type="x-shader/x-vertex">
 precision mediump float;
 attribute vec2 a_position;
@@ -28,6 +30,8 @@ void main() {
   gl_Position = vec4(a_position, 0, 1);
 }
 </script>
+
+<!-- Advect Shader -->
 <script id="fragmentShaderAdvect" type="x-shader/x-fragment">
 precision highp float;
 varying vec2 v_uv;
@@ -41,6 +45,8 @@ void main() {
   gl_FragColor = dissipation * texture2D(u_source, coord);
 }
 </script>
+
+<!-- Force Shader -->
 <script id="fragmentShaderForce" type="x-shader/x-fragment">
 precision highp float;
 varying vec2 v_uv;
@@ -61,6 +67,8 @@ void main() {
   gl_FragColor = vec4(velocity, 0.0, 1.0);
 }
 </script>
+
+<!-- Divergence Shader -->
 <script id="fragmentShaderDivergence" type="x-shader/x-fragment">
 precision highp float;
 varying vec2 v_uv;
@@ -77,6 +85,8 @@ void main() {
   gl_FragColor = vec4(divergence, 0.0, 0.0, 1.0);
 }
 </script>
+
+<!-- Jacobi Shader -->
 <script id="fragmentShaderJacobi" type="x-shader/x-fragment">
 precision highp float;
 varying vec2 v_uv;
@@ -95,6 +105,8 @@ void main() {
   gl_FragColor = vec4(pressure, 0.0, 0.0, 1.0);
 }
 </script>
+
+<!-- Gradient Subtract Shader -->
 <script id="fragmentShaderGradientSubtract" type="x-shader/x-fragment">
 precision highp float;
 varying vec2 v_uv;
@@ -113,6 +125,8 @@ void main() {
   gl_FragColor = vec4(velocity, 0.0, 1.0);
 }
 </script>
+
+<!-- Display Shader -->
 <script id="fragmentShaderDisplay" type="x-shader/x-fragment">
 precision highp float;
 varying vec2 v_uv;
@@ -135,9 +149,9 @@ void main() {
   gl_FragColor = vec4(color, 1.0);
 }
 </script>
+
 <script>
 (() => {
-  // Basic WebGL2 fluid sim setup adapted from Jos Stam style solver
   const canvas = document.getElementById('canvas');
   const gl = canvas.getContext('webgl2');
   if (!gl) {
@@ -151,7 +165,6 @@ void main() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  // Compile shader helper
   function compileShader(type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
@@ -162,7 +175,6 @@ void main() {
     return shader;
   }
 
-  // Create program helper
   function createProgram(vsSrc, fsSrc) {
     const vs = compileShader(gl.VERTEX_SHADER, vsSrc);
     const fs = compileShader(gl.FRAGMENT_SHADER, fsSrc);
@@ -176,7 +188,6 @@ void main() {
     return program;
   }
 
-  // Create a fullscreen quad
   const quadVerts = new Float32Array([
     -1, -1,
     1, -1,
@@ -189,7 +200,6 @@ void main() {
   gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
   gl.bufferData(gl.ARRAY_BUFFER, quadVerts, gl.STATIC_DRAW);
 
-  // Create framebuffer and textures helper
   function createFBO(w,h,internalFormat,format,type) {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -207,7 +217,6 @@ void main() {
     return {tex, fbo, w, h};
   }
 
-  // Ping-pong helper
   function createDoubleFBO(w,h,internalFormat,format,type) {
     let fbo1 = createFBO(w,h,internalFormat,format,type);
     let fbo2 = createFBO(w,h,internalFormat,format,type);
@@ -222,7 +231,6 @@ void main() {
     };
   }
 
-  // Load shaders
   const vertexShaderSrc = document.getElementById('vertexShader').textContent;
   const advectShaderSrc = document.getElementById('fragmentShaderAdvect').textContent;
   const forceShaderSrc = document.getElementById('fragmentShaderForce').textContent;
@@ -231,7 +239,6 @@ void main() {
   const gradientSubtractShaderSrc = document.getElementById('fragmentShaderGradientSubtract').textContent;
   const displayShaderSrc = document.getElementById('fragmentShaderDisplay').textContent;
 
-  // Programs
   const advectProgram = createProgram(vertexShaderSrc, advectShaderSrc);
   const forceProgram = createProgram(vertexShaderSrc, forceShaderSrc);
   const divergenceProgram = createProgram(vertexShaderSrc, divergenceShaderSrc);
@@ -239,249 +246,369 @@ void main() {
   const gradientSubtractProgram = createProgram(vertexShaderSrc, gradientSubtractShaderSrc);
   const displayProgram = createProgram(vertexShaderSrc, displayShaderSrc);
 
-  // Setup fullscreen quad attribute
+  // Setup attributes
   function setupQuad(program) {
-    const posLoc = gl.getAttribLocation(program, "a_position");
     gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    const loc = gl.getAttribLocation(program, 'a_position');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
   }
 
-  // Create double FBOs for velocity and pressure
-  let velocity = createDoubleFBO(SIM_RES, SIM_RES, gl.RG16F, gl.RG, gl.FLOAT);
-  let pressure = createDoubleFBO(SIM_RES, SIM_RES, gl.R16F, gl.RED, gl.FLOAT);
-  let divergence = createFBO(SIM_RES, SIM_RES, gl.R16F, gl.RED, gl.FLOAT);
+  // Create simulation textures/FBOs
+  const velocity = createDoubleFBO(SIM_RES, SIM_RES, gl.RGBA16F, gl.RGBA, gl.FLOAT);
+  const pressure = createDoubleFBO(SIM_RES, SIM_RES, gl.RGBA16F, gl.RGBA, gl.FLOAT);
+  const divergence = createFBO(SIM_RES, SIM_RES, gl.RGBA16F, gl.RGBA, gl.FLOAT);
 
-  // Initialize velocity and pressure to zero
-  gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.read.fbo);
-  gl.clearColor(0,0,0,1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.write.fbo);
-  gl.clearColor(0,0,0,1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, pressure.read.fbo);
-  gl.clearColor(0,0,0,1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, pressure.write.fbo);
-  gl.clearColor(0,0,0,1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
+  // Obstacle texture (single channel)
+  const obstacleTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, obstacleTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RED, SIM_RES, SIM_RES, 0, gl.RED, gl.UNSIGNED_BYTE, obstacles);
 
-  // Simulation parameters
+  function updateObstacleTexture() {
+    gl.bindTexture(gl.TEXTURE_2D, obstacleTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SIM_RES, SIM_RES, gl.RED, gl.UNSIGNED_BYTE, obstacles);
+  }
+
+  // Add obstacle handling to shaders:
+  // We'll replace advect, force, divergence, jacobi, gradient subtract shaders with versions that
+  // consider obstacles, so velocity inside obstacles is zero, and pressure solve respects obstacles.
+
+  // New advect shader with obstacle mask:
+  const advectWithObstacleShaderSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_velocity;
+uniform sampler2D u_source;
+uniform sampler2D u_obstacles;
+uniform float dt;
+uniform float dissipation;
+
+void main() {
+  float obstacle = texture2D(u_obstacles, v_uv).r;
+  if(obstacle > 0.1) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+  vec2 coord = v_uv - dt * texture2D(u_velocity, v_uv).xy;
+  float obstaclePrev = texture2D(u_obstacles, coord).r;
+  if(obstaclePrev > 0.1) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+  gl_FragColor = dissipation * texture2D(u_source, coord);
+}
+`;
+
+  // New force shader with obstacle check
+  const forceWithObstacleShaderSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_velocity;
+uniform sampler2D u_obstacles;
+uniform vec2 forcePos;
+uniform vec2 force;
+uniform float radius;
+
+void main() {
+  vec2 coord = v_uv;
+  float obstacle = texture2D(u_obstacles, coord).r;
+  if(obstacle > 0.1) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+  vec2 diff = coord - forcePos;
+  float dist = length(diff);
+  vec2 velocity = texture2D(u_velocity, coord).xy;
+  if(dist < radius) {
+    float f = (radius - dist) / radius;
+    velocity += force * f;
+  }
+  gl_FragColor = vec4(velocity, 0.0, 1.0);
+}
+`;
+
+  // Divergence with obstacle zero velocity:
+  const divergenceWithObstacleShaderSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_velocity;
+uniform sampler2D u_obstacles;
+uniform vec2 texelSize;
+
+void main() {
+  float centerObs = texture2D(u_obstacles, v_uv).r;
+  if(centerObs > 0.1) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+
+  float leftObs = texture2D(u_obstacles, v_uv - vec2(texelSize.x, 0)).r;
+  float rightObs = texture2D(u_obstacles, v_uv + vec2(texelSize.x, 0)).r;
+  float bottomObs = texture2D(u_obstacles, v_uv - vec2(0, texelSize.y)).r;
+  float topObs = texture2D(u_obstacles, v_uv + vec2(0, texelSize.y)).r;
+
+  float left = leftObs > 0.1 ? 0.0 : texture2D(u_velocity, v_uv - vec2(texelSize.x, 0)).x;
+  float right = rightObs > 0.1 ? 0.0 : texture2D(u_velocity, v_uv + vec2(texelSize.x, 0)).x;
+  float bottom = bottomObs > 0.1 ? 0.0 : texture2D(u_velocity, v_uv - vec2(0, texelSize.y)).y;
+  float top = topObs > 0.1 ? 0.0 : texture2D(u_velocity, v_uv + vec2(0, texelSize.y)).y;
+
+  float divergence = 0.5 * (right - left + top - bottom);
+  gl_FragColor = vec4(divergence, 0.0, 0.0, 1.0);
+}
+`;
+
+  // Jacobi with obstacle:
+  const jacobiWithObstacleShaderSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_pressure;
+uniform sampler2D u_divergence;
+uniform sampler2D u_obstacles;
+uniform vec2 texelSize;
+
+void main() {
+  float centerObs = texture2D(u_obstacles, v_uv).r;
+  if(centerObs > 0.1) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+
+  float leftObs = texture2D(u_obstacles, v_uv - vec2(texelSize.x, 0)).r;
+  float rightObs = texture2D(u_obstacles, v_uv + vec2(texelSize.x, 0)).r;
+  float bottomObs = texture2D(u_obstacles, v_uv - vec2(0, texelSize.y)).r;
+  float topObs = texture2D(u_obstacles, v_uv + vec2(0, texelSize.y)).r;
+
+  float left = leftObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv - vec2(texelSize.x, 0)).x;
+  float right = rightObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv + vec2(texelSize.x, 0)).x;
+  float bottom = bottomObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv - vec2(0, texelSize.y)).x;
+  float top = topObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv + vec2(0, texelSize.y)).x;
+
+  float divergence = texture2D(u_divergence, v_uv).x;
+
+  float pressure = (left + right + bottom + top - divergence) * 0.25;
+  gl_FragColor = vec4(pressure, 0.0, 0.0, 1.0);
+}
+`;
+
+  // Gradient subtract with obstacle
+  const gradientSubtractWithObstacleShaderSrc = `
+precision highp float;
+varying vec2 v_uv;
+uniform sampler2D u_velocity;
+uniform sampler2D u_pressure;
+uniform sampler2D u_obstacles;
+uniform vec2 texelSize;
+
+void main() {
+  float centerObs = texture2D(u_obstacles, v_uv).r;
+  if(centerObs > 0.1) {
+    gl_FragColor = vec4(0.0);
+    return;
+  }
+
+  float leftObs = texture2D(u_obstacles, v_uv - vec2(texelSize.x, 0)).r;
+  float rightObs = texture2D(u_obstacles, v_uv + vec2(texelSize.x, 0)).r;
+  float bottomObs = texture2D(u_obstacles, v_uv - vec2(0, texelSize.y)).r;
+  float topObs = texture2D(u_obstacles, v_uv + vec2(0, texelSize.y)).r;
+
+  float left = leftObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv - vec2(texelSize.x, 0)).x;
+  float right = rightObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv + vec2(texelSize.x, 0)).x;
+  float bottom = bottomObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv - vec2(0, texelSize.y)).x;
+  float top = topObs > 0.1 ? 0.0 : texture2D(u_pressure, v_uv + vec2(0, texelSize.y)).x;
+
+  vec2 velocity = texture2D(u_velocity, v_uv).xy;
+  velocity.xy -= vec2(right - left, top - bottom) * 0.5;
+  gl_FragColor = vec4(velocity, 0.0, 1.0);
+}
+`;
+
+  // Compile these new programs:
+  const advectProgramObstacle = createProgram(vertexShaderSrc, advectWithObstacleShaderSrc);
+  const forceProgramObstacle = createProgram(vertexShaderSrc, forceWithObstacleShaderSrc);
+  const divergenceProgramObstacle = createProgram(vertexShaderSrc, divergenceWithObstacleShaderSrc);
+  const jacobiProgramObstacle = createProgram(vertexShaderSrc, jacobiWithObstacleShaderSrc);
+  const gradientSubtractProgramObstacle = createProgram(vertexShaderSrc, gradientSubtractWithObstacleShaderSrc);
+
+  // Set up attribute pointers for all programs
+  const allPrograms = [
+    advectProgramObstacle,
+    forceProgramObstacle,
+    divergenceProgramObstacle,
+    jacobiProgramObstacle,
+    gradientSubtractProgramObstacle,
+    displayProgram,
+  ];
+  allPrograms.forEach(setupQuad);
+
+  // Uniform locations cache:
+  function getUniformLocations(prog, names) {
+    let locs = {};
+    names.forEach(name => {
+      locs[name] = gl.getUniformLocation(prog, name);
+    });
+    return locs;
+  }
+
+  const advectUniforms = getUniformLocations(advectProgramObstacle, ['u_velocity', 'u_source', 'u_obstacles', 'dt', 'dissipation']);
+  const forceUniforms = getUniformLocations(forceProgramObstacle, ['u_velocity', 'u_obstacles', 'forcePos', 'force', 'radius']);
+  const divergenceUniforms = getUniformLocations(divergenceProgramObstacle, ['u_velocity', 'u_obstacles', 'texelSize']);
+  const jacobiUniforms = getUniformLocations(jacobiProgramObstacle, ['u_pressure', 'u_divergence', 'u_obstacles', 'texelSize']);
+  const gradientSubtractUniforms = getUniformLocations(gradientSubtractProgramObstacle, ['u_velocity', 'u_pressure', 'u_obstacles', 'texelSize']);
+  const displayUniforms = getUniformLocations(displayProgram, ['u_velocity', 'u_pressure']);
+
+  // Simulation params
   const dt = 0.016;
   const dissipation = 0.99;
-  const numJacobiIterations = 20;
+  const forceRadius = 0.03;
 
-  // Wind force from left -> right (constant)
-  function applyWind() {
-    gl.useProgram(forceProgram);
-    setupQuad(forceProgram);
-    gl.uniform1i(gl.getUniformLocation(forceProgram, "u_velocity"), 0);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, velocity.read.tex);
+  // Initial conditions:
+  // Fill velocity with wind blowing right (e.g., 0.2 to right)
+  gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.read.fbo);
+  gl.viewport(0, 0, SIM_RES, SIM_RES);
+  gl.clearColor(0.2, 0.0, 0.0, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
 
-    // Apply horizontal force on a vertical band on left side
-    const windForcePos = [0.05, 0.5];
-    const windForceVec = [2.0, 0.0];
-    const radius = 0.1;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.write.fbo);
+  gl.clearColor(0.2, 0.0, 0.0, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  velocity.swap();
 
-    gl.uniform2fv(gl.getUniformLocation(forceProgram, "forcePos"), windForcePos);
-    gl.uniform2fv(gl.getUniformLocation(forceProgram, "force"), windForceVec);
-    gl.uniform1f(gl.getUniformLocation(forceProgram, "radius"), radius);
+  // Clear pressure & divergence to zero:
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pressure.read.fbo);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pressure.write.fbo);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  pressure.swap();
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, divergence.fbo);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  // Mouse obstacle adding:
+  canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width);
+    const y = 1 - ((e.clientY - rect.top) / rect.height);
+    const i = Math.floor(x * SIM_RES);
+    const j = Math.floor(y * SIM_RES);
+    const index = j * SIM_RES + i;
+    obstacles[index] = obstacles[index] ? 0 : 255;
+    updateObstacleTexture();
+  });
+
+  // Helper to bind textures:
+  function bindTexture(tex, unit) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+  }
+
+  function render() {
+    // 1. Advect velocity
+    gl.useProgram(advectProgramObstacle);
+    gl.uniform1i(advectUniforms.u_velocity, 0);
+    gl.uniform1i(advectUniforms.u_source, 1);
+    gl.uniform1i(advectUniforms.u_obstacles, 2);
+    gl.uniform1f(advectUniforms.dt, dt);
+    gl.uniform1f(advectUniforms.dissipation, dissipation);
+    bindTexture(velocity.read.tex, 0);
+    bindTexture(velocity.read.tex, 1);
+    bindTexture(obstacleTex, 2);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.write.fbo);
     gl.viewport(0, 0, SIM_RES, SIM_RES);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     velocity.swap();
-  }
 
-  // Advection step
-  function advect(field, velocityField) {
-    gl.useProgram(advectProgram);
-    setupQuad(advectProgram);
-    gl.uniform1i(gl.getUniformLocation(advectProgram, "u_velocity"), 0);
-    gl.uniform1i(gl.getUniformLocation(advectProgram, "u_source"), 1);
-    gl.uniform1f(gl.getUniformLocation(advectProgram, "dt"), dt);
-    gl.uniform1f(gl.getUniformLocation(advectProgram, "dissipation"), dissipation);
+    // 2. Apply force (wind blowing right)
+    gl.useProgram(forceProgramObstacle);
+    gl.uniform1i(forceUniforms.u_velocity, 0);
+    gl.uniform1i(forceUniforms.u_obstacles, 1);
+    gl.uniform2f(forceUniforms.forcePos, 0.05, 0.5); // Near left edge middle
+    gl.uniform2f(forceUniforms.force, 0.15, 0.0);
+    gl.uniform1f(forceUniforms.radius, forceRadius);
+    bindTexture(velocity.read.tex, 0);
+    bindTexture(obstacleTex, 1);
 
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, velocityField.read.tex);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, field.read.tex);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, field.write.fbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.write.fbo);
     gl.viewport(0, 0, SIM_RES, SIM_RES);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-    field.swap();
-  }
+    velocity.swap();
 
-  // Compute divergence
-  function computeDivergence(velocityField) {
-    gl.useProgram(divergenceProgram);
-    setupQuad(divergenceProgram);
-
-    gl.uniform1i(gl.getUniformLocation(divergenceProgram, "u_velocity"), 0);
-    gl.uniform2fv(gl.getUniformLocation(divergenceProgram, "texelSize"), [1/SIM_RES,1/SIM_RES]);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, velocityField.read.tex);
+    // 3. Compute divergence
+    gl.useProgram(divergenceProgramObstacle);
+    gl.uniform1i(divergenceUniforms.u_velocity, 0);
+    gl.uniform1i(divergenceUniforms.u_obstacles, 1);
+    gl.uniform2f(divergenceUniforms.texelSize, 1.0 / SIM_RES, 1.0 / SIM_RES);
+    bindTexture(velocity.read.tex, 0);
+    bindTexture(obstacleTex, 1);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, divergence.fbo);
     gl.viewport(0, 0, SIM_RES, SIM_RES);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-  }
 
-  // Pressure solve (Jacobi iteration)
-  function pressureSolve() {
-    gl.useProgram(jacobiProgram);
-    setupQuad(jacobiProgram);
-    gl.uniform1i(gl.getUniformLocation(jacobiProgram, "u_divergence"), 1);
-    gl.uniform2fv(gl.getUniformLocation(jacobiProgram, "texelSize"), [1/SIM_RES, 1/SIM_RES]);
+    // 4. Pressure solve (Jacobi iteration)
+    gl.useProgram(jacobiProgramObstacle);
+    gl.uniform1i(jacobiUniforms.u_pressure, 0);
+    gl.uniform1i(jacobiUniforms.u_divergence, 1);
+    gl.uniform1i(jacobiUniforms.u_obstacles, 2);
+    gl.uniform2f(jacobiUniforms.texelSize, 1.0 / SIM_RES, 1.0 / SIM_RES);
 
-    for(let i = 0; i < numJacobiIterations; i++) {
-      gl.uniform1i(gl.getUniformLocation(jacobiProgram, "u_pressure"), 0);
-
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, pressure.read.tex);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, divergence.tex);
+    for(let i=0; i<20; i++) {
+      bindTexture(pressure.read.tex, 0);
+      bindTexture(divergence.tex, 1);
+      bindTexture(obstacleTex, 2);
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, pressure.write.fbo);
       gl.viewport(0, 0, SIM_RES, SIM_RES);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       pressure.swap();
     }
-  }
 
-  // Subtract gradient to make velocity divergence free
-  function subtractGradient() {
-    gl.useProgram(gradientSubtractProgram);
-    setupQuad(gradientSubtractProgram);
-    gl.uniform1i(gl.getUniformLocation(gradientSubtractProgram, "u_velocity"), 0);
-    gl.uniform1i(gl.getUniformLocation(gradientSubtractProgram, "u_pressure"), 1);
-    gl.uniform2fv(gl.getUniformLocation(gradientSubtractProgram, "texelSize"), [1/SIM_RES, 1/SIM_RES]);
+    // 5. Subtract gradient
+    gl.useProgram(gradientSubtractProgramObstacle);
+    gl.uniform1i(gradientSubtractUniforms.u_velocity, 0);
+    gl.uniform1i(gradientSubtractUniforms.u_pressure, 1);
+    gl.uniform1i(gradientSubtractUniforms.u_obstacles, 2);
+    gl.uniform2f(gradientSubtractUniforms.texelSize, 1.0 / SIM_RES, 1.0 / SIM_RES);
 
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, velocity.read.tex);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, pressure.read.tex);
+    bindTexture(velocity.read.tex, 0);
+    bindTexture(pressure.read.tex, 1);
+    bindTexture(obstacleTex, 2);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.write.fbo);
     gl.viewport(0, 0, SIM_RES, SIM_RES);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     velocity.swap();
-  }
 
-  // Draw final pressure and velocity map
-  function renderDisplay() {
+    // 6. Render to screen
     gl.useProgram(displayProgram);
-    setupQuad(displayProgram);
+    gl.uniform1i(displayUniforms.u_velocity, 0);
+    gl.uniform1i(displayUniforms.u_pressure, 1);
 
-    gl.uniform1i(gl.getUniformLocation(displayProgram, "u_velocity"), 0);
-    gl.uniform1i(gl.getUniformLocation(displayProgram, "u_pressure"), 1);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, velocity.read.tex);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, pressure.read.tex);
+    bindTexture(velocity.read.tex, 0);
+    bindTexture(pressure.read.tex, 1);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    requestAnimationFrame(render);
   }
 
-  // Obstacles mask texture setup
-  // White = obstacle, black = fluid
-  let obstacleTex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, obstacleTex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  requestAnimationFrame(render);
 
-  function updateObstacleTexture() {
-    gl.bindTexture(gl.TEXTURE_2D, obstacleTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, SIM_RES, SIM_RES, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, obstacles);
-  }
-
-  // Initialize empty obstacles
-  for(let i = 0; i < obstacles.length; i++) obstacles[i] = 0;
-  updateObstacleTexture();
-
-  // Add rectangular obstacles in middle by default
-  function addObstacle(x, y, size=12) {
-    let centerX = Math.floor(x * SIM_RES);
-    let centerY = Math.floor(y * SIM_RES);
-    for(let i = -size; i <= size; i++) {
-      for(let j = -size; j <= size; j++) {
-        let xi = centerX + i;
-        let yj = centerY + j;
-        if(xi >= 0 && xi < SIM_RES && yj >= 0 && yj < SIM_RES) {
-          obstacles[yj * SIM_RES + xi] = 255;
-        }
-      }
-    }
-    updateObstacleTexture();
-  }
-
-  // Remove obstacle on click (toggle)
-  canvas.addEventListener('click', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = 1 - (e.clientY - rect.top) / rect.height;
-    let cx = Math.floor(x * SIM_RES);
-    let cy = Math.floor(y * SIM_RES);
-    // Toggle obstacle cell (square 12x12)
-    let exists = false;
-    for(let i = -12; i <= 12; i++) {
-      for(let j = -12; j <= 12; j++) {
-        let xi = cx + i;
-        let yj = cy + j;
-        if(xi >= 0 && xi < SIM_RES && yj >= 0 && yj < SIM_RES) {
-          if(obstacles[yj * SIM_RES + xi] === 255) exists = true;
-        }
-      }
-    }
-    let newVal = exists ? 0 : 255;
-    for(let i = -12; i <= 12; i++) {
-      for(let j = -12; j <= 12; j++) {
-        let xi = cx + i;
-        let yj = cy + j;
-        if(xi >= 0 && xi < SIM_RES && yj >= 0 && yj < SIM_RES) {
-          obstacles[yj * SIM_RES + xi] = newVal;
-        }
-      }
-    }
-    updateObstacleTexture();
-  });
-
-  // Main simulation step
-  function step() {
-    applyWind();
-    advect(velocity, velocity);
-    computeDivergence(velocity);
-    pressureSolve();
-    subtractGradient();
-  }
-
-  // Resize canvas
-  function resize() {
+  window.addEventListener('resize', () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    gl.viewport(0,0,canvas.width,canvas.height);
-  }
-  window.addEventListener('resize', resize);
-  resize();
-
-  // Run simulation loop
-  function loop() {
-    step();
-    renderDisplay();
-    requestAnimationFrame(loop);
-  }
-  loop();
+  });
 
 })();
 </script>
 </body>
 </html>
-
